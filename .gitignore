@@ -1,0 +1,14 @@
+# 忽略 Python 虚拟环境（venv 文件夹）
+venv/  
+
+# 忽略 Python 编译缓存（__pycache__ 文件夹）
+__pycache__/  
+
+# 忽略系统生成的临时文件（可选）
+*.log  
+*.tmp  
+
+# 若有其他不重要的文件夹/文件，也可在此添加，例如：
+
+# 示例：忽略上传的依赖清单（若不需要上传 requirements.txt 可注释掉）
+requirements.txt  

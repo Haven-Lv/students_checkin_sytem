@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>活动签到</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        div { margin-bottom: 10px; }
+        input { width: 90%; padding: 10px; margin-top: 5px; }
+        button { width: 100%; padding: 12px; font-size: 16px; }
+        #loading, #message { text-align: center; padding: 20px; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <div id="loading">正在加载...</div>
+    
+    <div id="activityInfo" style="display:none;">
+        <h2 id="activityName"></h2>
+        <p id="activityLocation"></p>
+        <p id="activityTime"></p>
+    </div>
+
+    <div id="checkInForm" style="display:none;">
+        <h3>签到</h3>
+        <div>
+            <label for="student_id">学号:</label>
+            <input type="text" id="student_id" required>
+        </div>
+        <div>
+            <label for="name">姓名:</label>
+            <input type="text" id="name" required>
+        </div>
+        <button id="checkInButton">签 到</button>
+    </div>
+
+    <div id="checkOutForm" style="display:none;">
+        <h3>您已签到</h3>
+        <button id="checkOutButton">签 退</button>
+    </div>
+
+    <div id="message"></div>
+
+    <script>
+        // --- 核心JS逻辑 ---
+        const urlParams = new URLSearchParams(window.location.search);
+        const activityCode = urlParams.get('code');
+        const tokenStorageKey = `device_session_token_${activityCode}`;
+
+        const loadingDiv = document.getElementById('loading');
+        const activityInfoDiv = document.getElementById('activityInfo');
+        const checkInForm = document.getElementById('checkInForm');
+        const checkOutForm = document.getElementById('checkOutForm');
+        const messageDiv = document.getElementById('message');
+        
+        const checkInButton = document.getElementById('checkInButton');
+        const checkOutButton = document.getElementById('checkOutButton');
+
+        // 在页面加载时运行
+        document.addEventListener('DOMContentLoaded', async () => {
+            if (!activityCode) {
+                showMessage('无效的活动链接', true);
+                return;
+            }
+
+            // 1. 获取活动信息
+            try {
+                const response = await fetch(`/students_system/api/participant/activity/${activityCode}`);
+                if (!response.ok) throw new Error(await response.text());
+                
+                const activity = await response.json();
+                document.getElementById('activityName').innerText = activity.name;
+                document.getElementById('activityLocation').innerText = `地点: ${activity.location_name}`;
+                document.getElementById('activityTime').innerText = `时间: ${new Date(activity.start_time).toLocaleString()} - ${new Date(activity.end_time).toLocaleString()}`;
+                activityInfoDiv.style.display = 'block';
+
+            } catch (error) {
+                showMessage(`加载活动失败: ${error.message}`, true);
+                return;
+            }
+            
+            // 2. 检查本地存储中是否有 Token
+            const deviceToken = localStorage.getItem(tokenStorageKey);
+            
+            if (deviceToken) {
+                // 已签到，显示签退按钮
+                checkOutForm.style.display = 'block';
+            } else {
+                // 未签到，显示签到表单
+                checkInForm.style.display = 'block';
+            }
+            
+            loadingDiv.style.display = 'none';
+        });
+
+        // --- 签到逻辑 ---
+        checkInButton.addEventListener('click', () => {
+            const studentId = document.getElementById('student_id').value;
+            const name = document.getElementById('name').value;
+            if (!studentId || !name) {
+                showMessage('学号和姓名不能为空', true);
+                return;
+            }
+            
+            performAction('checkin', { student_id: studentId, name: name });
+        });
+
+        // --- 签退逻辑 ---
+        checkOutButton.addEventListener('click', () => {
+            const deviceToken = localStorage.getItem(tokenStorageKey);
+            if (!deviceToken) {
+                showMessage('签到凭证丢失，请刷新页面', true);
+                return; // 理论上不会发生
+            }
+            
+            performAction('checkout', { device_session_token: deviceToken });
+        });
+
+        // --- 统一的动作执行器 (签到/签退) ---
+        function performAction(type, payload) {
+            showMessage('正在获取您的位置信息...', false);
+            checkInButton.disabled = true;
+            checkOutButton.disabled = true;
+
+            navigator.geolocation.getCurrentPosition(
+                async (position) => {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    
+                    showMessage('位置获取成功，正在提交...', false);
+
+                    const fullPayload = {
+                        ...payload,
+                        activity_code: activityCode,
+                        latitude: lat,
+                        longitude: lon
+                    };
+                    
+                    try {
+                        const response = await fetch(`/students_system/api/participant/${type}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(fullPayload)
+                        });
+
+                        const result = await response.json();
+                        
+                        if (!response.ok) {
+                            throw new Error(result.detail || '操作失败');
+                        }
+
+                        // --- 核心状态转换 ---
+                        if (type === 'checkin') {
+                            // 签到成功，存储 Token
+                            localStorage.setItem(tokenStorageKey, result.device_session_token);
+                            showMessage('签到成功!', false);
+                            checkInForm.style.display = 'none';
+                            checkOutForm.style.display = 'block';
+                        } else {
+                            // 签退成功，删除 Token
+                            localStorage.removeItem(tokenStorageKey);
+                            showMessage('签退成功!', false);
+                            checkOutForm.style.display = 'none';
+                        }
+
+                    } catch (error) {
+                        showMessage(`操作失败: ${error.message}`, true);
+                    } finally {
+                        checkInButton.disabled = false;
+                        checkOutButton.disabled = false;
+                    }
+                },
+                (error) => {
+                    // 地理位置获取失败
+                    let msg = '获取地理位置失败。';
+                    switch (error.code) {
+                        case error.PERMISSION_DENIED:
+                            msg += ' 请允许浏览器访问您的位置。';
+                            break;
+                        case error.POSITION_UNAVAILABLE:
+                            msg += ' 位置信息不可用。';
+                            break;
+                        case error.TIMEOUT:
+                            msg += ' 获取位置超时。';
+                            break;
+                    }
+                    showMessage(msg, true);
+                    checkInButton.disabled = false;
+                    checkOutButton.disabled = false;
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 } // 强制获取最新位置
+            );
+        }
+
+        function showMessage(msg, isError) {
+            messageDiv.innerText = msg;
+            messageDiv.className = isError ? 'error' : 'success';
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理员控制台</title>
+    
+    <script>
+        const token = localStorage.getItem('admin_access_token');
+        if (!token) {
+            // 如果没有 token，立即重定向到登录页
+            window.location.href = '/students_system/admin_login.html';
+        }
+    </script>
+
+    <script type="text/javascript">
+        window._AMapSecurityConfig = {
+            securityJsCode: '3b5f49eb59da5745a5f054734d1d5889', // 替换为您的安全密钥
+        }
+    </script>
+    <script type="text/javascript" 
+            src="https://webapi.amap.com/maps?v=2.0&key=3b5f49eb59da5745a5f054734d1d5889"> // 替换为您的 Key
+    </script>
+
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f0f2f5;
+            margin: 0;
+            color: #333;
+        }
+        header {
+            background-color: #fff;
+            padding: 0 2rem;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        header h1 {
+            font-size: 1.5rem;
+            color: #007bff;
+        }
+        #logout-button {
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        #logout-button:hover {
+            background-color: #c82333;
+        }
+        main {
+            max-width: 1000px;
+            margin: 2rem auto;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 2rem;
+        }
+        section {
+            background-color: #fff;
+            padding: 1.5rem 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        h2 {
+            font-size: 1.25rem;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 0.5rem;
+            margin-top: 0;
+        }
+        /* 表单样式 */
+        #activityForm {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem 1.5rem;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+        .form-group label {
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+        .form-group input {
+            padding: 0.75rem;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 1rem;
+        }
+        .form-group-full {
+            grid-column: 1 / -1; /* 占满整行 */
+        }
+        #map {
+            width: 100%;
+            height: 350px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            margin-top: 0.5rem;
+        }
+        #submit-button {
+            grid-column: 1 / -1;
+            padding: 0.85rem;
+            font-size: 1.1rem;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        #submit-button:hover {
+            background-color: #0056b3;
+        }
+        /* 结果区域 */
+        #result {
+            grid-column: 1 / -1;
+            text-align: center;
+        }
+        #result img {
+            margin-top: 1rem;
+            border: 1px solid #ddd;
+            padding: 5px;
+            border-radius: 4px;
+        }
+        .success-msg { color: green; font-weight: bold; }
+        .error-msg { color: red; font-weight: bold; }
+
+        /* 活动列表 */
+        #activity-list ul {
+            list-style: none;
+            padding: 0;
+        }
+        #activity-list li {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem;
+            border-bottom: 1px solid #eee;
+        }
+        #activity-list li:last-child {
+            border-bottom: none;
+        }
+        .activity-info {
+            font-size: 1.1rem;
+        }
+        .activity-info span {
+            font-size: 0.9rem;
+            color: #555;
+            display: block;
+        }
+        .activity-actions button {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 0.4rem 0.8rem;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .activity-actions button:hover {
+            background: #218838;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>学生活动签到 - 管理控制台</h1>
+        <button id="logout-button">退出登录</button>
+    </header>
+
+    <main>
+        <section>
+            <h2>创建新活动</h2>
+            <form id="activityForm">
+                <div class="form-group">
+                    <label for="name">活动名称:</label>
+                    <input type="text" id="name" required>
+                </div>
+                <div class="form-group">
+                    <label for="radius_meters">签到半径 (米):</label>
+                    <input type="number" id="radius_meters" value="100" required>
+                </div>
+                <div class="form-group">
+                    <label for="start_time">开始时间:</label>
+                    <input type="datetime-local" id="start_time" required>
+                </div>
+                <div class="form-group">
+                    <label for="end_time">结束时间:</label>
+                    <input type="datetime-local" id="end_time" required>
+                </div>
+                
+                <div class="form-group-full">
+                    <label>选择地点 (在地图上点击选择)</label>
+                    <div id="map"></div>
+                </div>
+
+                <div class="form-group-full">
+                    <label for="location_name">地点名称 (自动获取):</label>
+                    <input type="text" id="location_name" readonly>
+                </div>
+                
+                <input type="hidden" id="latitude">
+                <input type="hidden" id="longitude">
+                
+                <button type="submit" id="submit-button">创建活动</button>
+                <div id="result" class="form-group-full"></div>
+            </form>
+        </section>
+
+        <section>
+            <h2>已有活动</h2>
+            <div id="activity-list">
+                <ul>
+                    </ul>
+            </div>
+        </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.4.4/build/qrcode.min.js"></script>
+
+    <script>
+        // --- 0. 全局变量和 Token ---
+        var map;
+        var marker;
+        var geocoder;
+        const ADMIN_TOKEN = localStorage.getItem('admin_access_token');
+
+        // --- 1. 退出登录 ---
+        document.getElementById('logout-button').addEventListener('click', () => {
+            localStorage.removeItem('admin_access_token');
+            window.location.href = '/students_system/admin_login.html';
+        });
+
+        // --- 2. 页面加载主函数 ---
+        window.onload = function() {
+            // 加载高德地图插件
+            AMap.plugin(['AMap.Geolocation', 'AMap.Geocoder', 'AMap.Marker'], function() {
+                
+                marker = new AMap.Marker();
+                geocoder = new AMap.Geocoder();
+
+                var geolocation = new AMap.Geolocation({
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    zoomToAccuracy: true,
+                });
+
+                // 尝试获取当前位置
+                geolocation.getCurrentPosition(function(status, result) {
+                    var centerPoint = [116.397428, 39.90923]; // 默认北京
+                    if (status == 'complete') {
+                        centerPoint = [result.position.lng, result.position.lat];
+                    } else {
+                        console.error('Geolocation failed:', result.message);
+                    }
+                    initMap(centerPoint); // 初始化地图
+                });
+            });
+
+            // 页面加载时，获取活动列表
+            loadActivities();
+        };
+
+        // --- 3. 地图初始化函数 ---
+        function initMap(centerLngLat) {
+            map = new AMap.Map('map', {
+                zoom: 15,
+                center: centerLngLat
+            });
+            // 绑定地图点击事件
+            map.on('click', handleMapClick);
+        }
+
+        // --- 4. 地图点击事件 ---
+        function handleMapClick(e) {
+            var lat = e.lnglat.getLat();
+            var lng = e.lnglat.getLng();
+            
+            document.getElementById('latitude').value = lat;
+            document.getElementById('longitude').value = lng;
+            
+            marker.setPosition(e.lnglat);
+            map.add(marker);
+            
+            geocoder.getAddress(e.lnglat, function(status, result) {
+                if (status === 'complete' && result.info === 'OK') {
+                    document.getElementById('location_name').value = result.regeocode.formattedAddress;
+                } else {
+                    document.getElementById('location_name').value = "未知地点";
+                }
+            });
+        }
+
+        // --- 5. (新) 加载活动列表 ---
+        async function loadActivities() {
+            const listContainer = document.getElementById('activity-list').querySelector('ul');
+            listContainer.innerHTML = '<li>正在加载...</li>'; // 提示
+
+            try {
+                const response = await fetch('/students_system/api/admin/activities', {
+                    method: 'GET',
+                    headers: { 'Authorization': `Bearer ${ADMIN_TOKEN}` }
+                });
+
+                if (response.status === 401) {
+                    listContainer.innerHTML = '<li>会话已过期，请重新登录。</li>';
+                    return;
+                }
+                
+                const activities = await response.json();
+                listContainer.innerHTML = ''; // 清空
+                
+                if (activities.length === 0) {
+                    listContainer.innerHTML = '<li>暂无活动。</li>';
+                    return;
+                }
+
+                activities.forEach(activity => {
+                    const li = document.createElement('li');
+                    
+                    const startTime = new Date(activity.start_time).toLocaleString('zh-CN');
+                    const endTime = new Date(activity.end_time).toLocaleString('zh-CN');
+
+                    li.innerHTML = `
+                        <div class="activity-info">
+                            ${activity.name}
+                            <span>${startTime} - ${endTime}</span>
+                        </div>
+                        <div class="activity-actions">
+                            <button onclick="showQr('${activity.unique_code}')">查看二维码</button>
+                            </div>
+                    `;
+                    listContainer.appendChild(li);
+                });
+
+            } catch (error) {
+                console.error('加载活动失败:', error);
+                listContainer.innerHTML = '<li style="color:red;">加载活动失败。</li>';
+            }
+        }
+        
+        // (新) 查看二维码的辅助函数
+        function showQr(code) {
+            // 这个函数只是个示例，您可以将其显示在弹窗中
+            // 这里我们用它来更新“创建活动”区域的二维码
+            const resultDiv = document.getElementById('result');
+            const qrUrl = `/students_system/api/participant/activity/${code}/qr`;
+            resultDiv.innerHTML = `<h3>活动二维码 (代码: ${code})</h3>
+                                 <img src="${qrUrl}" alt="签到二维码" width="200">`;
+            
+            // 滚动到结果区域
+            resultDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+
+
+        // --- 6. 表单提交逻辑 ---
+        document.getElementById('activityForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = '正在创建...';
+
+            const data = {
+                name: document.getElementById('name').value,
+                start_time: document.getElementById('start_time').value,
+                end_time: document.getElementById('end_time').value,
+                radius_meters: parseInt(document.getElementById('radius_meters').value),
+                latitude: parseFloat(document.getElementById('latitude').value),
+                longitude: parseFloat(document.getElementById('longitude').value),
+                location_name: document.getElementById('location_name').value
+            };
+
+            if (!data.latitude) {
+                resultDiv.innerHTML = '<p class="error-msg">请在地图上选择一个地点</p>';
+                return;
+            }
+
+            try {
+                const response = await fetch('/students_system/api/admin/activities', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${ADMIN_TOKEN}` // 携带 Token
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.status === 401) {
+                    resultDiv.innerHTML = '<p class="error-msg">认证失败：请重新登录。</p>';
+                    return;
+                }
+
+                if (response.ok) {
+                    const result = await response.json();
+                    
+                    // 使用新的 API 端点获取二维码
+                    const qrUrl = `/students_system/api/participant/activity/${result.unique_code}/qr`;
+                    
+                    resultDiv.innerHTML = `
+                        <h3 class="success-msg">活动创建成功!</h3>
+                        <p>活动代码: ${result.unique_code}</p>
+                        <img src="${qrUrl}" alt="签到二维码" width="200">`;
+                    
+                    // 重置表单
+                    document.getElementById('activityForm').reset();
+                    marker.setMap(null); // 移除地图上的标记
+
+                    // 刷新活动列表
+                    loadActivities();
+
+                } else {
+                    const errorData = await response.json();
+                    resultDiv.innerHTML = `<p class="error-msg">创建失败: ${errorData.detail || '未知错误'}</p>`;
+                }
+            } catch (error) {
+                console.error('创建活动时出错:', error);
+                resultDiv.innerHTML = '<p class="error-msg">创建失败，请检查网络连接。</p>';
+            }
+        });
+    </script>
+
+</body>
+</html>

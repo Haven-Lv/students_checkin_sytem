@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理员登录</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f4f4f4;
+            margin: 0;
+        }
+        #login-box {
+            background-color: #fff;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            width: 300px;
+        }
+        h2 {
+            text-align: center;
+            margin-top: 0;
+        }
+        div {
+            margin-bottom: 1rem;
+        }
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+        }
+        input {
+            width: 100%;
+            padding: 0.5rem;
+            box-sizing: border-box; /* 确保 padding 不会撑大宽度 */
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            width: 100%;
+            padding: 0.75rem;
+            font-size: 1rem;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #message {
+            margin-top: 1rem;
+            text-align: center;
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <div id="login-box">
+        <h2>管理员登录</h2>
+        <form id="loginForm">
+            <div>
+                <label for="username">用户名:</label>
+                <input type="text" id="username" required>
+            </div>
+            <div>
+                <label for="password">密码:</label>
+                <input type="password" id="password" required>
+            </div>
+            <button type="submit">登 录</button>
+        </form>
+        <div id="message"></div>
+    </div>
+
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async function(e) {
+            e.preventDefault(); // 阻止表单默认提交
+
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = ''; // 清空错误信息
+
+            try {
+                // 向后端 /api/admin/login 发送请求
+                // 这个 URL 是 Nginx 转发后的
+                const response = await fetch('/students_system/api/admin/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    // FastAPI 的 OAuth2PasswordBearer 需要 form data 格式
+                    // 但我们的 /login 路由 (main.py) 定义的是接收 JSON (models.AdminLogin)
+                    // 所以我们发送 JSON
+                    body: JSON.stringify({
+                        username: username,
+                        password: password
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    // 登录失败 (例如 401 Unauthorized)
+                    throw new Error(data.detail || '登录失败');
+                }
+
+                // 登录成功！
+                // data 应该是 { "access_token": "...", "token_type": "bearer" }
+                
+                // --- 关键步骤 ---
+                // 1. 将 token 存储在 localStorage 中
+                localStorage.setItem('admin_access_token', data.access_token);
+                
+                // 2. 跳转到管理员控制台
+                window.location.href = '/students_system/admin_dashboard.html';
+
+            } catch (error) {
+                console.error('登录时出错:', error);
+                messageDiv.textContent = error.message;
+            }
+        });
+    </script>
+</body>
+</html>
