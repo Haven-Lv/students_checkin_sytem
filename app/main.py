@@ -144,13 +144,13 @@ async def delete_activity(
             raise HTTPException(status_code=500, detail=f"删除失败: {e}")
 
 @router_admin.put("/activities/{activity_code}")
-async def update_activity_time(
+async def update_activity(
     activity_code: str,
-    time_update: models.ActivityTimeUpdate,
+    activity_update: models.ActivityUpdate, # 使用新的模型
     admin_user: str = Depends(security.get_current_admin)
 ):
     """
-    更新活动时间 (受保护)
+    更新活动信息 (时间、地点、范围)
     """
     with get_db_connection() as db:
         activity = db_utils.get_activity_by_code(db, activity_code)
@@ -158,9 +158,11 @@ async def update_activity_time(
             raise HTTPException(status_code=404, detail="Activity not found")
         
         try:
-            db_utils.db_update_activity_time(
-                db, activity['id'], time_update.start_time, time_update.end_time
+            # 调用新的数据库更新函数
+            db_utils.db_update_activity(
+                db, activity['id'], activity_update
             )
+            # 返回更新后的最新数据
             updated_activity = db_utils.get_activity_by_code(db, activity_code)
             return updated_activity
         except Exception as e:

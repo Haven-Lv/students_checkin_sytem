@@ -2,7 +2,7 @@ import mysql.connector
 from mysql.connector.cursor import MySQLCursorDict
 from contextlib import contextmanager
 from .config import settings
-from .models import ActivityCreate, ParticipantLogin
+from .models import ActivityCreate, ParticipantLogin, ActivityUpdate
 from datetime import datetime, timedelta
 import uuid
 import haversine as hs
@@ -124,7 +124,13 @@ def get_activity_by_code(db, code: str):
 
 def get_all_activities(db):
     cursor = db.cursor(dictionary=True)
-    cursor.execute("SELECT id, name, unique_code, start_time, end_time FROM activities ORDER BY created_at DESC")
+    # 修改：增加查询 location_name, latitude, longitude, radius_meters
+    cursor.execute("""
+        SELECT id, name, unique_code, start_time, end_time, 
+               location_name, latitude, longitude, radius_meters 
+        FROM activities 
+        ORDER BY created_at DESC
+    """)
     activities = cursor.fetchall()
     cursor.close()
     return activities
@@ -235,12 +241,26 @@ def db_delete_activity(db, activity_id: int):
     finally:
         cursor.close()
 
-def db_update_activity_time(db, activity_id: int, start_time: datetime, end_time: datetime):
-    """更新活动的开始和结束时间"""
+# 修改：支持更新所有信息
+def db_update_activity(db, activity_id: int, update_data: ActivityUpdate):
     cursor = db.cursor()
-    query = "UPDATE activities SET start_time = %s, end_time = %s WHERE id = %s"
+    query = """
+    UPDATE activities 
+    SET start_time = %s, end_time = %s, 
+        radius_meters = %s, location_name = %s, 
+        latitude = %s, longitude = %s
+    WHERE id = %s
+    """
     try:
-        cursor.execute(query, (start_time, end_time, activity_id))
+        cursor.execute(query, (
+            update_data.start_time, 
+            update_data.end_time,
+            update_data.radius_meters,
+            update_data.location_name,
+            update_data.latitude,
+            update_data.longitude,
+            activity_id
+        ))
         db.commit()
         cursor.close()
         return True

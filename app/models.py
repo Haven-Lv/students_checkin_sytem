@@ -66,6 +66,10 @@ class CheckInResponse(BaseModel):
     message: str
     device_session_token: str
     
-class ActivityTimeUpdate(BaseModel):
+class ActivityUpdate(BaseModel):
     start_time: datetime
     end_time: datetime
+    radius_meters: int
+    location_name: str
+    latitude: float
+    longitude: float

@@ -377,15 +377,21 @@
                     const isoStart = new Date(activity.start_time).toISOString().slice(0, 16);
                     const isoEnd = new Date(activity.end_time).toISOString().slice(0, 16);
 
+                    // 修改按钮：将 btn-time 改名为 “编辑活动”，并传递更多参数
+                    // 注意：location_name 可能包含引号，建议使用 escape 或简单的替换处理，或者只传 code 并在弹窗里重新 fetch。
+                    // 为了简单起见，这里假设 location_name 不含特殊字符，或者我们使用 encodeURIComponent
+                    const safeLocName = encodeURIComponent(activity.location_name || '');
+
                     li.innerHTML = `
                         <div class="activity-info">
                             ${activity.name}
                             <span>${startTime} - ${endTime}</span>
+                            <span style="font-size:0.8rem; color:#888;">${activity.location_name || '未知地点'} (半径: ${activity.radius_meters}m)</span>
                         </div>
                         <div class="activity-actions">
-                            <button class="btn-logs" onclick="showDetails('${activity.unique_code}', '${activity.name}')">查看详情</button>
-                            <button class="btn-time" onclick="showUpdateModal('${activity.unique_code}', '${isoStart}', '${isoEnd}')">更改时间</button>
-                            <button class="btn-qr" onclick="showQr('${activity.unique_code}')">二维码和链接</button>
+                            <button class="btn-logs" onclick="showDetails('${activity.unique_code}', '${activity.name}')">详情</button>
+                            <button class="btn-time" onclick="showUpdateModal('${activity.unique_code}', '${isoStart}', '${isoEnd}', '${activity.radius_meters}', '${safeLocName}', ${activity.latitude}, ${activity.longitude})">编辑</button>
+                            <button class="btn-qr" onclick="showQr('${activity.unique_code}')">二维码</button>
                             <button class="btn-delete" onclick="deleteActivity('${activity.unique_code}', '${activity.name}')">删除</button>
                         </div>
                     `;
@@ -481,31 +487,105 @@
         }
 
         // --- 8. 显示更改时间表单 ---
-        function showUpdateModal(code, startTime, endTime) {
+        // --- 定义全局变量用于编辑地图 ---
+        var updateMap, updateMarker;
+
+        function showUpdateModal(code, start, end, radius, encLocName, lat, lng) {
+            const locName = decodeURIComponent(encLocName);
+            
+            // 生成编辑表单 HTML
             resultDiv.innerHTML = `
-                <h3>更改活动时间 (Code: ${code})</h3>
-                <div id="update-time-form">
-                    <div class="form-group">
-                        <label for="update_start_time">新开始时间:</label>
-                        <input type="datetime-local" id="update_start_time" value="${startTime}">
+                <h3>编辑活动信息 (Code: ${code})</h3>
+                <div id="update-form-container" style="border:1px solid #ddd; padding:15px; background:#fff; border-radius:4px;">
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <div class="form-group">
+                            <label>开始时间:</label>
+                            <input type="datetime-local" id="u_start" value="${start}">
+                        </div>
+                        <div class="form-group">
+                            <label>结束时间:</label>
+                            <input type="datetime-local" id="u_end" value="${end}">
+                        </div>
+                        <div class="form-group">
+                            <label>签到半径 (米):</label>
+                            <input type="number" id="u_radius" value="${radius}">
+                        </div>
+                        <div class="form-group">
+                            <label>地点名称:</label>
+                            <input type="text" id="u_loc_name" value="${locName}">
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="update_end_time">新结束时间:</label>
-                        <input type="datetime-local" id="update_end_time" value="${endTime}">
+                    
+                    <div class="form-group" style="margin-top:10px;">
+                        <label>修改位置 (拖拽或点击地图):</label>
+                        <div id="u_map" style="width:100%; height:300px; border:1px solid #ccc; margin-top:5px;"></div>
+                        <input type="hidden" id="u_lat" value="${lat}">
+                        <input type="hidden" id="u_lng" value="${lng}">
                     </div>
-                    <button id="submit-update-button" class="btn-qr" onclick="handleUpdateTime('${code}')">确认修改</button>
+
+                    <button class="btn-qr" style="width:100%; margin-top:15px; padding:10px;" onclick="handleUpdateActivity('${code}')">保存修改</button>
+                    <button onclick="document.getElementById('result').innerHTML=''" style="margin-top:10px; background:#ccc; border:none; padding:5px 10px; cursor:pointer;">取消</button>
                 </div>
             `;
             resultDiv.scrollIntoView({ behavior: 'smooth' });
+
+            // --- 关键：在 DOM 渲染后初始化地图 ---
+            setTimeout(() => {
+                // 如果 lat/lng 无效，给个默认值
+                const center = (lat && lng) ? [lng, lat] : [116.397428, 39.90923];
+                
+                updateMap = new AMap.Map('u_map', {
+                    zoom: 16,
+                    center: center
+                });
+
+                updateMarker = new AMap.Marker({
+                    position: center,
+                    draggable: true, // 允许拖拽
+                    cursor: 'move'
+                });
+                updateMap.add(updateMarker);
+
+                // 绑定拖拽结束事件
+                updateMarker.on('dragend', function(e) {
+                    document.getElementById('u_lat').value = e.lnglat.getLat();
+                    document.getElementById('u_lng').value = e.lnglat.getLng();
+                    // 可选：拖拽后自动更新地点名称（逆地理编码）
+                    regeoCode(e.lnglat);
+                });
+
+                // 绑定点击地图事件
+                updateMap.on('click', function(e) {
+                    updateMarker.setPosition(e.lnglat);
+                    document.getElementById('u_lat').value = e.lnglat.getLat();
+                    document.getElementById('u_lng').value = e.lnglat.getLng();
+                    regeoCode(e.lnglat);
+                });
+            }, 100);
         }
 
-        // --- 9. 处理更改时间提交 ---
-        async function handleUpdateTime(code) {
-            const newStart = document.getElementById('update_start_time').value;
-            const newEnd = document.getElementById('update_end_time').value;
+        // 辅助函数：逆地理编码更新名称
+        function regeoCode(lnglat) {
+            geocoder.getAddress(lnglat, function(status, result) {
+                if (status === 'complete' && result.info === 'OK') {
+                    document.getElementById('u_loc_name').value = result.regeocode.formattedAddress;
+                }
+            });
+        }
 
-            if (!newStart || !newEnd) {
-                alert('时间不能为空');
+        // --- 9. 处理更改所有信息提交 ---
+        async function handleUpdateActivity(code) {
+            const data = {
+                start_time: document.getElementById('u_start').value,
+                end_time: document.getElementById('u_end').value,
+                radius_meters: parseInt(document.getElementById('u_radius').value),
+                location_name: document.getElementById('u_loc_name').value,
+                latitude: parseFloat(document.getElementById('u_lat').value),
+                longitude: parseFloat(document.getElementById('u_lng').value)
+            };
+
+            if (!data.start_time || !data.end_time || !data.location_name) {
+                alert("请填写完整信息");
                 return;
             }
 
@@ -516,10 +596,7 @@
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${ADMIN_TOKEN}`
                     },
-                    body: JSON.stringify({
-                        start_time: newStart,
-                        end_time: newEnd
-                    })
+                    body: JSON.stringify(data)
                 });
 
                 if (!response.ok) {
@@ -527,11 +604,11 @@
                     throw new Error(err.detail || '更新失败');
                 }
                 
-                resultDiv.innerHTML = `<p class="success-msg">活动时间更新成功!</p>`;
+                resultDiv.innerHTML = `<p class="success-msg">活动信息更新成功!</p>`;
                 loadActivities(); // 刷新列表
 
             } catch (error) {
-                 resultDiv.innerHTML += `<p class="error-msg" style="text-align:center;">${error.message}</p>`;
+                alert(`更新失败: ${error.message}`);
             }
         }
 
