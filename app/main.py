@@ -38,7 +38,7 @@ router_admin = APIRouter(prefix="/api/admin", tags=["Admin"])
 router_participant = APIRouter(prefix="/api/participant", tags=["Participant"])
 
 # ==================================================
-# 1. 管理员路由 (保持不变)
+# 1. 管理员路由
 # ==================================================
 
 @router_admin.post("/login", response_model=models.Token)
@@ -61,29 +61,33 @@ async def login_for_access_token(form_data: models.AdminLogin):
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
+# [修改 1] 根据要求修改 create_activity
 @router_admin.post("/activities", response_model=models.ActivityResponse)
 async def create_activity(
     activity: models.ActivityCreate, 
-    admin_user: str = Depends(security.get_current_admin)
+    current_admin: dict = Depends(security.get_current_admin)
 ):
     """
     创建新活动 (受保护)
     """
     with get_db_connection() as db:
         try:
-            unique_code = db_utils.db_create_activity(db, activity)
+            # 传入 admin_id
+            unique_code = db_utils.db_create_activity(db, activity, current_admin['id'])
             new_activity = db_utils.get_activity_by_code(db, unique_code)
             return new_activity
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to create activity: {e}")
 
+# [修改 2] 根据要求修改 get_activities_list
 @router_admin.get("/activities")
-async def get_activities_list(admin_user: str = Depends(security.get_current_admin)):
+async def get_activities_list(current_admin: dict = Depends(security.get_current_admin)):
     """
     获取所有活动列表 (受保护)
     """
     with get_db_connection() as db:
-        activities = db_utils.get_all_activities(db)
+        # 传入 admin_id，只获取该管理员的活动
+        activities = db_utils.get_all_activities(db, current_admin['id'])
         return activities
 
 @router_admin.get("/activities/{activity_code}/qr")
@@ -243,9 +247,13 @@ async def send_email_code(request: Request, req: models.EmailRequest): # <--- �
 @router_participant.get("/status")
 async def get_current_status(current_user: dict = Depends(get_current_student)):
     student_id = current_user['sub']
+    # 新增：从 Token 解析出的 current_user 中获取 admin_id
+    admin_id = current_user.get('admin_id') 
     
     with get_db_connection() as db:
-        participant = db_utils.get_participant(db, student_id)
+        # 修改：传入 admin_id
+        participant = db_utils.get_participant(db, student_id, admin_id)
+        
         if not participant:
             # 如果用户不存在，说明没签到
             return {"is_checked_in": False}
@@ -263,10 +271,10 @@ async def get_current_status(current_user: dict = Depends(get_current_student)):
         else:
             return {"is_checked_in": False}
 
-# --- 新增：登录/注册接口 ---
+# [修改 3] 根据要求修改 login_with_email
 @router_participant.post("/login", response_model=models.Token)
 async def login_with_email(req: models.StudentLogin):
-    """邮箱登录/注册一体化接口"""
+    """邮箱登录/注册一体化接口 (多租户版)"""
     with get_db_connection() as db:
         # 1. 校验验证码
         valid_code = db_utils.get_valid_code(db, req.email)
@@ -274,43 +282,62 @@ async def login_with_email(req: models.StudentLogin):
         if not valid_code or valid_code != req.code:
             raise HTTPException(status_code=400, detail="验证码错误或已过期")
             
-        # 2. 查询用户是否存在
-        student = db_utils.get_participant_by_email(db, req.email)
+        # 2. 【核心】确定上下文 (是哪个学校？)
+        target_admin_id = None
+        if req.activity_code: 
+            activity = db_utils.get_activity_by_code(db, req.activity_code)
+            if activity:
+                target_admin_id = activity['admin_id']
         
-        # 3. 如果不存在，则是注册，必须提供学号和姓名
+        # 如果没有活动码，无法确定注册到哪个学校，必须报错
+        if not target_admin_id:
+             raise HTTPException(status_code=400, detail="请通过扫描活动二维码进行注册/登录")
+
+        # 3. 在特定学校下查询用户
+        student = db_utils.get_participant_by_email_and_admin(db, req.email, target_admin_id)
+        
+        # 4. 注册逻辑
         if not student:
             if not req.student_id or not req.name:
                 # 返回特定状态码，告诉前端需要弹出注册框
                 raise HTTPException(status_code=400, detail="NEED_REGISTER_INFO")
             
-            # 检查学号是否被占用
-            if db_utils.get_participant(db, req.student_id):
-                 raise HTTPException(status_code=400, detail="该学号已被绑定")
+            # 检查该学校下学号是否被占用
+            if db_utils.get_participant(db, req.student_id, target_admin_id):
+                 raise HTTPException(status_code=400, detail="该学号在当前组织已被绑定")
             
             try:
-                db_utils.register_student_with_email(db, req.student_id, req.name, req.email)
-                student = db_utils.get_participant_by_email(db, req.email)
+                # 注册时传入 admin_id
+                db_utils.register_student_with_email(db, req.student_id, req.name, req.email, target_admin_id)
+                student = db_utils.get_participant_by_email_and_admin(db, req.email, target_admin_id)
             except Exception as e:
                 raise HTTPException(status_code=500, detail="注册失败")
 
-        # 4. 生成 Token (Payload 中放入学号 student_id)
+        # 5. 生成 Token (Payload 中放入学号 student_id 和 admin_id)
         access_token = security.create_access_token(
-            data={"sub": student['student_id'], "role": "student"} 
+            data={
+                "sub": student['student_id'], 
+                "role": "student", 
+                "admin_id": target_admin_id # <--- 放入 Token
+            } 
         )
         return {"access_token": access_token, "token_type": "bearer"}
 
-# --- 修改：鉴权签到 (替代了原来的 /checkin) ---
+# [修改 4] 根据要求修改 checkin_authorized
 @router_participant.post("/checkin-auth", response_model=models.CheckInResponse)
 async def checkin_authorized(
     request: models.CheckInRequestAuthorized, 
-    current_user: dict = Depends(get_current_student) # 强制要求登录
+    current_user: dict = Depends(get_current_student) 
 ):
     """已登录用户的签到接口"""
-    student_id = current_user['sub'] # 从 Token 获取学号
-    
+    student_id = current_user['sub']
+    # 新增：获取 admin_id
+    admin_id = current_user.get('admin_id') 
+
     try:
         with get_db_connection() as db:
-            participant = db_utils.get_participant(db, student_id)
+            # 修改：传入 admin_id 查找学生
+            participant = db_utils.get_participant(db, student_id, admin_id)
             if not participant:
                 raise HTTPException(status_code=401, detail="用户不存在")
 
@@ -319,22 +346,24 @@ async def checkin_authorized(
             
             if not activity:
                 return JSONResponse(status_code=200, content={"detail": "活动不存在"})
+            
+            # 新增校验：防止 A 学校的学生扫 B 学校的码签到
+            if activity['admin_id'] != admin_id:
+                 return JSONResponse(status_code=200, content={"detail": "您无权签到该活动 (组织不匹配)"})
+
             if not (activity['start_time'] <= now <= activity['end_time']):
                 return JSONResponse(status_code=200, content={"detail": "不在活动时间范围内"})
 
-            # --- 坐标转换与距离计算 (复用原逻辑) ---
+            # --- 坐标转换与距离计算 (保持不变) ---
             try:
-                # 1. 活动坐标 GCJ -> WGS
                 act_lon_float = float(activity['longitude'])
                 act_lat_float = float(activity['latitude'])
                 act_wgs_lon, act_wgs_lat = coord_utils.gcj2wgs(act_lon_float, act_lat_float)
                 
-                # 2. 学生坐标 GCJ -> WGS
                 req_lon_float = float(request.longitude)
                 req_lat_float = float(request.latitude)
                 req_wgs_lon, req_wgs_lat = coord_utils.gcj2wgs(req_lon_float, req_lat_float)
                 
-                # 3. 计算距离
                 distance = db_utils.calculate_distance(
                     act_wgs_lat, act_wgs_lon,
                     req_wgs_lat, req_wgs_lon
@@ -359,23 +388,24 @@ async def checkin_authorized(
     except HTTPException:
         raise
     except Exception as e:
+        # 这里会捕获 TypeError (参数缺失) 并转为 500，就是你看到的报错
+        print(f"Error in checkin: {e}") 
         raise HTTPException(status_code=500, detail=f"签到未知错误: {str(e)}")
 
-# 新增：实名认证签退接口 (CheckOutRequestAuthorized)
-# 先在 models.py 里确认一下有没有 CheckOutRequestAuthorized，如果没有，用下面的 dict 接收也行，或者复用 CheckInRequestAuthorized
-# 建议复用 CheckInRequestAuthorized，因为参数一样（活动代码、经纬度）
 
 @router_participant.post("/checkout-auth")
 async def checkout_authorized(
-    request: models.CheckInRequestAuthorized, # 复用这个模型，因为它包含了 lat/lon 和 activity_code
+    request: models.CheckInRequestAuthorized, 
     current_user: dict = Depends(get_current_student)
 ):
-    """实名签退 (支持跨设备)"""
+    """实名签退"""
     student_id = current_user['sub']
+    # 新增：获取 admin_id
+    admin_id = current_user.get('admin_id')
     
     with get_db_connection() as db:
-        # 1. 找人
-        participant = db_utils.get_participant(db, student_id)
+        # 修改：传入 admin_id
+        participant = db_utils.get_participant(db, student_id, admin_id)
         if not participant:
             raise HTTPException(status_code=401, detail="用户不存在")
             
@@ -385,7 +415,7 @@ async def checkout_authorized(
         if not active_log:
              raise HTTPException(status_code=400, detail="未找到有效的签到记录，或已签退")
              
-        # 3. 校验活动是否匹配 (防止A活动签到，跑去扫B活动的码签退)
+        # 3. 校验活动是否匹配
         if active_log['unique_code'] != request.activity_code:
              raise HTTPException(status_code=400, detail="您当前的签到记录与此活动不符")
 
@@ -394,7 +424,7 @@ async def checkout_authorized(
         if not (active_log['start_time'] <= now <= active_log['end_time']):
              raise HTTPException(status_code=400, detail="不在活动时间范围内")
 
-        # 5. 校验地点 (复用之前的逻辑)
+        # 5. 校验地点
         try:
             act_wgs_lat, act_wgs_lon = coord_utils.gcj2wgs(float(active_log['longitude']), float(active_log['latitude']))
             req_wgs_lat, req_wgs_lon = coord_utils.gcj2wgs(float(request.longitude), float(request.latitude))
@@ -403,7 +433,6 @@ async def checkout_authorized(
             distance = 0
             
         if distance > active_log['radius_meters']:
-             # 同样返回 200 给前端处理逻辑错误
              return JSONResponse(status_code=200, content={"detail": f"您不在签退范围内 (距离 {int(distance)} 米)"})
 
         # 6. 执行签退

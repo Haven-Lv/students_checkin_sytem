@@ -12,7 +12,7 @@
   * **活动管理**：
       * 创建活动：设置名称、时间、签到半径，并在地图上点选位置。
       * 生成二维码：一键生成活动专属签到二维码。
-      * 管理活动：修改活动时间、删除活动。
+      * 管理活动：修改活动名称、时间、地点、半径、状态、删除活动。
   * **数据统计**：查看每个活动的详细签到/签退日志（包含学号、姓名、时间）。
 
 ### 🙋‍♂️ 学生端
@@ -50,7 +50,7 @@ haven-lv/students_checkin_sytem/
 │       ├── admin_login.html
 │       ├── checkin.html
 │       └── student_login.html
-├── requirements.txt        # (建议创建) 项目依赖列表
+├── requirements.txt        # 项目依赖列表
 └── .gitignore
 ```
 
@@ -192,8 +192,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ## ⚠️ 注意事项
 
 1.  **HTTPS 协议**：现代浏览器要求地理位置 API (`navigator.geolocation`) 必须在 **HTTPS** 环境下才能调用（localhost 除外）。部署到服务器时请务必配置 SSL 证书。
-2.  **高德地图 Key**：项目代码中包含了演示用的 Key，可能会失效或受限。请前往 [高德开放平台](https://console.amap.com/) 申请 Web 端 (JS API) 的 Key 和安全密钥。
-3.  **坐标系**：系统内部处理了国内常见的火星坐标系 (GCJ-02) 与 GPS 坐标系 (WGS-84) 的转换，确保距离计算准确。
+2.  **坐标系**：系统内部处理了国内常见的火星坐标系 (GCJ-02) 与 GPS 坐标系 (WGS-84) 的转换，确保距离计算准确。
+3.  **需创建 `.env` 文件**：根据实际环境修改 `app/config.py` 中的配置，使用 `.env` 文件来存储敏感信息（如数据库密码、JWT 密钥等）。
 
 ## 🤝 贡献
 

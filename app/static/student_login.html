@@ -64,13 +64,23 @@
         }
 
         async function doLogin() {
-            const email = document.getElementById('email').value;
-            const code = document.getElementById('code').value;
-            const studentId = document.getElementById('student_id').value;
-            const name = document.getElementById('name').value;
-            const msg = document.getElementById('msg');
+                const email = document.getElementById('email').value;
+                const code = document.getElementById('code').value;
+                const studentId = document.getElementById('student_id').value;
+                const name = document.getElementById('name').value;
+                const msg = document.getElementById('msg');
 
-            const payload = { email, code };
+                // --- 修改开始 ---
+                // 获取 URL 中的 redirect_code (即 activity_code)
+                const urlParams = new URLSearchParams(window.location.search);
+                const activityCode = urlParams.get('redirect_code');
+
+                const payload = { 
+                    email, 
+                    code,
+                    activity_code: activityCode // 新增参数
+                };
+
             if (isRegistering) {
                 if(!studentId || !name) return alert('请补充学号和姓名');
                 payload.student_id = studentId;

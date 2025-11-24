@@ -6,10 +6,9 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 
 from .config import settings
+from . import db_utils  # <--- 必须导入 db_utils
 
 # 1. 密码哈希
-# 使用 pbkdf2_sha256 作为默认哈希方案（纯 Python 实现），避免依赖本地 bcrypt 库导致的兼容性问题。
-# 如果需要兼容旧的 bcrypt 哈希，可将 "bcrypt" 加回到 schemes 列表中（注意可能会触发 bcrypt 后端检测）。
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -30,14 +29,12 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
-# 3. OAuth2 依赖
-# 这个依赖会检查请求头中的 'Authorization: Bearer [TOKEN]'
+# 3. OAuth2 依赖 (Admin)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/admin/login")
 
-async def get_current_admin(token: str = Depends(oauth2_scheme)) -> str:
+async def get_current_admin(token: str = Depends(oauth2_scheme)):
     """
-    依赖项：用于保护管理员路由。
-    验证 JWT 并返回管理员用户名。
+    管理员鉴权：返回完整的 admin 字典对象 (包含 id)
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -52,10 +49,20 @@ async def get_current_admin(token: str = Depends(oauth2_scheme)) -> str:
     except JWTError:
         raise credentials_exception
     
-# 定义学生用的 OAuth2 Scheme (复用同一个 endpoint 也没关系，主要是为了从 Header 取 Token)
+    # 查库获取 admin_id
+    with db_utils.get_db_connection() as db:
+        admin = db_utils.get_admin_by_username(db, username)
+        if not admin:
+            raise credentials_exception
+        return admin 
+
+# 4. OAuth2 依赖 (Student)
 oauth2_student_scheme = OAuth2PasswordBearer(tokenUrl="/api/participant/login")
 
 async def get_current_student(token: str = Depends(oauth2_student_scheme)):
+    """
+    学生鉴权：解析 Token 并返回 student_id 和 admin_id
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="登录已过期，请重新登录",
@@ -66,14 +73,13 @@ async def get_current_student(token: str = Depends(oauth2_student_scheme)):
         student_id: str = payload.get("sub")
         role: str = payload.get("role")
         
+        # --- 关键修改：必须从 payload 中提取 admin_id ---
+        admin_id: int = payload.get("admin_id") 
+        
         if student_id is None or role != "student":
             raise credentials_exception
         
-        # 返回用户信息字典
-        return {"sub": student_id, "role": role}
+        # 返回包含 admin_id 的字典
+        return {"sub": student_id, "role": role, "admin_id": admin_id}
     except JWTError:
         raise credentials_exception
-
-    # 在这个方案中，我们只返回用户名
-    # 也可以在这里查询数据库以获取完整的 Admin 对象
-    return username

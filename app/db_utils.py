@@ -29,21 +29,22 @@ def get_valid_code(db, email):
     return None
 
 # --- 新增：学生操作 ---
-def get_participant_by_email(db, email):
+def get_participant_by_email_and_admin(db, email, admin_id):
     cursor = db.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM participants WHERE email = %s", (email,))
+    cursor.execute("SELECT * FROM participants WHERE email = %s AND admin_id = %s", (email, admin_id))
     return cursor.fetchone()
 
-def register_student_with_email(db, student_id, name, email):
+def register_student_with_email(db, student_id, name, email, admin_id):
     cursor = db.cursor()
     try:
-        cursor.execute("INSERT INTO participants (student_id, name, email) VALUES (%s, %s, %s)", 
-                       (student_id, name, email))
+        # 插入 admin_id
+        cursor.execute("INSERT INTO participants (student_id, name, email, admin_id) VALUES (%s, %s, %s, %s)", 
+                       (student_id, name, email, admin_id))
         db.commit()
         return cursor.lastrowid
     except mysql.connector.Error as err:
         db.rollback()
-        raise err # 可能是学号或邮箱重复
+        raise err
     finally:
         cursor.close()
 
@@ -95,17 +96,17 @@ def db_create_admin(db, username: str, hashed_pass: str):
         cursor.close()
 
 # --- 活动相关 ---
-def db_create_activity(db, activity: ActivityCreate):
+def db_create_activity(db, activity: ActivityCreate, admin_id: int):
     unique_code = str(uuid.uuid4())
     cursor = db.cursor()
     query = """
-    INSERT INTO activities (name, location_name, latitude, longitude, radius_meters, start_time, end_time, unique_code)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    INSERT INTO activities (name, location_name, latitude, longitude, radius_meters, start_time, end_time, unique_code, admin_id)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
     try:
         cursor.execute(query, (
             activity.name, activity.location_name, activity.latitude, activity.longitude,
-            activity.radius_meters, activity.start_time, activity.end_time, unique_code
+            activity.radius_meters, activity.start_time, activity.end_time, unique_code, admin_id # <--- 插入 admin_id
         ))
         db.commit()
         return unique_code
@@ -122,15 +123,15 @@ def get_activity_by_code(db, code: str):
     cursor.close()
     return activity
 
-def get_all_activities(db):
+def get_all_activities(db, admin_id: int):
     cursor = db.cursor(dictionary=True)
-    # 修改：增加查询 location_name, latitude, longitude, radius_meters
     cursor.execute("""
         SELECT id, name, unique_code, start_time, end_time, 
                location_name, latitude, longitude, radius_meters 
         FROM activities 
+        WHERE admin_id = %s 
         ORDER BY created_at DESC
-    """)
+    """, (admin_id,)) # <--- 过滤条件
     activities = cursor.fetchall()
     cursor.close()
     return activities
@@ -150,9 +151,10 @@ def get_check_logs_for_activity(db, activity_id: int):
     return logs
 
 # --- 参与者/签到相关 ---
-def get_participant(db, student_id: str):
+def get_participant(db, student_id: str, admin_id: int):
     cursor = db.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM participants WHERE student_id = %s", (student_id,))
+    # 必须同时匹配 student_id 和 admin_id
+    cursor.execute("SELECT * FROM participants WHERE student_id = %s AND admin_id = %s", (student_id, admin_id))
     participant = cursor.fetchone()
     cursor.close()
     return participant

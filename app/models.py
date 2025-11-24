@@ -36,7 +36,7 @@ class EmailRequest(BaseModel):
 class StudentLogin(BaseModel):
     email: str
     code: str
-    # 如果是新用户注册，需要填下面两项；老用户登录只需填上面两项
+    activity_code: Optional[str] = None
     student_id: Optional[str] = None
     name: Optional[str] = None
 

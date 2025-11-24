@@ -422,6 +422,18 @@
 
                         // 4. 处理业务逻辑拒绝 (后端返回 200 但包含 detail 错误信息)
                         if (resultData.detail) {
+                            // --- 新增代码开始：自动引导切换身份 ---
+                            if (resultData.detail.includes('组织不匹配')) {
+                                if (confirm('检测到您当前的登录身份不属于该活动所在的组织/学校。\n\n需要重新登录以切换到该组织吗？')) {
+                                    // 清除旧的 Token
+                                    localStorage.removeItem('student_token');
+                                    // 跳转到登录页 (带上当前活动的 code，以便重新注册/登录到正确的组织)
+                                    window.location.href = `student_login.html?redirect_code=${activityCode}`;
+                                    return;
+                                }
+                            }
+                            // --- 新增代码结束 ---
+                            
                             throw new Error(resultData.detail);
                         }
 
