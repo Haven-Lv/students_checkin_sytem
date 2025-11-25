@@ -24,6 +24,7 @@ from . import models
 from . import security
 from .config import settings
 from .security import get_current_student
+from .email_templates import EmailTemplates
 
 app = FastAPI(
     title="学生活动签到系统",
@@ -276,8 +277,8 @@ async def get_activity_qr_code(activity_code: str):
 # --- 新增：邮箱验证码接口 ---
 @router_participant.post("/send-code")
 @limiter.limit("1/minute")
-async def send_email_code(request: Request, req: models.EmailRequest): # <--- 必须加上 request: Request
-    """发送 6 位数字验证码到邮箱"""
+async def send_email_code(request: Request, req: models.EmailRequest):
+    """发送 6 位数字验证码到邮箱 (使用 HTML 模板)"""
     code = str(random.randint(100000, 999999))
     
     # 1. 保存到数据库
@@ -286,10 +287,17 @@ async def send_email_code(request: Request, req: models.EmailRequest): # <--- �
     
     # 2. 发送邮件
     try:
-        msg = MIMEText(f"【校园签到】您的验证码是：{code}，5分钟内有效。请勿泄露。", 'plain', 'utf-8')
-        msg['From'] = formataddr(["签到系统", settings.SMTP_USER])
+        # --- 修改开始：使用 HTML 模板 ---
+        # 生成 HTML 内容
+        html_content = EmailTemplates.verification_code_email(code, valid_minutes=5)
+        
+        # 构造 MIMEText，注意第二个参数改为 'html'
+        msg = MIMEText(html_content, 'html', 'utf-8')
+        
+        msg['From'] = formataddr(["校园签到系统", settings.SMTP_USER])
         msg['To'] = req.email
-        msg['Subject'] = "登录验证码"
+        msg['Subject'] = "【安全验证】您的登录验证码" # 稍微改一下标题显得更正式
+        # --- 修改结束 ---
 
         server = smtplib.SMTP_SSL(settings.SMTP_SERVER, settings.SMTP_PORT)
         server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
@@ -297,6 +305,7 @@ async def send_email_code(request: Request, req: models.EmailRequest): # <--- �
         server.quit()
     except Exception as e:
         print(f"邮件发送失败: {e}")
+        # 在生产环境中，建议记录详细日志
         raise HTTPException(status_code=500, detail="邮件发送失败，请检查邮箱地址或联系管理员")
 
     return {"message": "验证码已发送"}
